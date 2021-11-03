@@ -338,7 +338,7 @@ where
                     let end = keys.last().unwrap().as_encoded();
                     info!("gc regions"; "store_id" => store_id, "start" => ?start,  "end" => ?end);
                     let full_regions_vec =
-                        box_try!(region_info_provider.get_regions_in_range(start, end));
+                        box_try!(region_info_provider.get_regions_encompassing_range(start, end));
                     info!("gc full_regions"; "regions" => full_regions_vec.len());
                     let regions = full_regions_vec
                         .into_iter()

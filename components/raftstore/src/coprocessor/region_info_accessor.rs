@@ -89,6 +89,11 @@ pub enum RegionInfoQuery {
         end_key: Vec<u8>,
         callback: Callback<Vec<Region>>,
     },
+    GetRegionsEncompassingRange {
+        start_key: Vec<u8>,
+        end_key: Vec<u8>,
+        callback: Callback<Vec<Region>>,
+    },
     /// Gets all contents from the collection. Only used for testing.
     DebugDump(mpsc::Sender<(RegionsMap, RegionRangesMap)>),
 }
@@ -108,6 +113,14 @@ impl Display for RegionInfoQuery {
             } => write!(
                 f,
                 "GetRegionsInRange(start_key: {}, end_key: {})",
+                &log_wrappers::Value::key(start_key),
+                &log_wrappers::Value::key(end_key)
+            ),
+            RegionInfoQuery::GetRegionsEncompassingRange {
+                start_key, end_key, ..
+            } => write!(
+                f,
+                "GetRegionsEncompassingRange(start_key: {}, end_key: {})",
                 &log_wrappers::Value::key(start_key),
                 &log_wrappers::Value::key(end_key)
             ),
@@ -382,12 +395,37 @@ impl RegionCollector {
         callback: Callback<Vec<Region>>,
     ) {
         let mut regions = vec![];
-        let start_key = data_key(&start_key);
-        let end_key = data_key(&end_key);
         info!("gc get_regions_in_range"; "regions_size" => self.region_ranges.len(), "first_region" => ?(self.region_ranges.iter().next()), "start_key" => ?start_key);
         for (_, region_id) in self
             .region_ranges
             .range((Included(start_key), Included(end_key)))
+        {
+            let region_info = &self.regions[region_id];
+            regions.push(region_info.region.clone());
+        }
+        callback(regions);
+    }
+
+    pub fn handle_get_regions_encompassing_range(
+        &self,
+        start_key: Vec<u8>,
+        end_key: Vec<u8>,
+        callback: Callback<Vec<Region>>,
+    ) {
+        let mut regions = vec![];
+        let start_key = data_key(&start_key);
+        let end_key = data_key(&end_key);
+        info!("gc get_regions_encompassing_range"; "regions_size" => self.region_ranges.len(), "first_region" => ?(self.region_ranges.iter().next()), "start_key" => ?start_key);
+        let end_key_region_key = self
+            .region_ranges
+            .range((Excluded(end_key), Unbounded))
+            .next()
+            .map(|(k, _v)| k.clone())
+            .map(move |k| Included(k))
+            .unwrap_or(Unbounded);
+        for (_, region_id) in self
+            .region_ranges
+            .range((Included(start_key), end_key_region_key))
         {
             let region_info = &self.regions[region_id];
             regions.push(region_info.region.clone());
@@ -459,6 +497,13 @@ impl Runnable for RegionCollector {
                 callback,
             } => {
                 self.handle_get_regions_in_range(start_key, end_key, callback);
+            }
+            RegionInfoQuery::GetRegionsEncompassingRange {
+                start_key,
+                end_key,
+                callback,
+            } => {
+                self.handle_get_regions_encompassing_range(start_key, end_key, callback);
             }
             RegionInfoQuery::DebugDump(tx) => {
                 tx.send((self.regions.clone(), self.region_ranges.clone()))
@@ -550,6 +595,14 @@ pub trait RegionInfoProvider: Send + Sync {
     fn get_regions_in_range(&self, _start_key: &[u8], _end_key: &[u8]) -> Result<Vec<Region>> {
         unimplemented!()
     }
+
+    fn get_regions_encompassing_range(
+        &self,
+        _start_key: &[u8],
+        _end_key: &[u8],
+    ) -> Result<Vec<Region>> {
+        unimplemented!()
+    }
 }
 
 impl RegionInfoProvider for RegionInfoAccessor {
@@ -595,6 +648,36 @@ impl RegionInfoProvider for RegionInfoAccessor {
                 rx.recv().map_err(|e| {
                     box_err!(
                         "failed to receive get_regions_in_range result from region collector: {:?}",
+                        e
+                    )
+                })
+            })
+    }
+    fn get_regions_encompassing_range(
+        &self,
+        start_key: &[u8],
+        end_key: &[u8],
+    ) -> Result<Vec<Region>> {
+        let (tx, rx) = mpsc::channel();
+        let msg = RegionInfoQuery::GetRegionsEncompassingRange {
+            start_key: start_key.to_vec(),
+            end_key: end_key.to_vec(),
+            callback: Box::new(move |regions| {
+                if let Err(e) = tx.send(regions) {
+                    warn!(
+                        "failed to send get_regions_encompassing_range result: {:?}",
+                        e
+                    );
+                }
+            }),
+        };
+        self.scheduler
+            .schedule(msg)
+            .map_err(|e| box_err!("failed to send request to region collector: {:?}", e))
+            .and_then(|_| {
+                rx.recv().map_err(|e| {
+                    box_err!(
+                        "failed to receive get_regions_encompassing_range result from region collector: {:?}",
                         e
                     )
                 })
