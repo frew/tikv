@@ -382,6 +382,8 @@ impl RegionCollector {
         callback: Callback<Vec<Region>>,
     ) {
         let mut regions = vec![];
+        let start_key = data_key(&start_key);
+        let end_key = data_key(&end_key);
         info!("gc get_regions_in_range"; "regions_size" => self.region_ranges.len(), "first_region" => ?(self.region_ranges.iter().next()), "start_key" => ?start_key);
         for (_, region_id) in self
             .region_ranges
