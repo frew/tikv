@@ -298,14 +298,25 @@ where
         struct KeysInRegions<R: Iterator<Item = Region>> {
             keys: Peekable<IntoIter<Key>>,
             regions: Peekable<R>,
+            has_logged: bool,
         }
         impl<R: Iterator<Item = Region>> Iterator for KeysInRegions<R> {
             type Item = Key;
             fn next(&mut self) -> Option<Key> {
                 loop {
+                    if !self.has_logged {
+                        info!("gc Doing region check");
+                    }
                     let region = self.regions.peek()?;
+                    if !self.has_logged {
+                        info!("gc Doing key check");
+                    }
                     let key = self.keys.peek()?;
                     let data_key = keys::data_key(key.as_encoded());
+                    if !self.has_logged {
+                        info!("gc First keys"; "data_key" => ?data_key, "region_key" => ?(region.get_start_key()));
+                        self.has_logged = true
+                    }
                     if data_key.as_slice() < region.get_start_key() {
                         self.keys.next();
                     } else if data_key.as_slice() < region.get_end_key() {
@@ -325,12 +336,20 @@ where
                 if let Some((store_id, region_info_provider)) = regions_provider {
                     let start = keys.first().unwrap().as_encoded();
                     let end = keys.last().unwrap().as_encoded();
-                    let regions = box_try!(region_info_provider.get_regions_in_range(start, end))
+                    info!("gc regions"; "store_id" => store_id, "start" => ?start,  "end" => ?end);
+                    let full_regions_vec =
+                        box_try!(region_info_provider.get_regions_in_range(start, end));
+                    info!("gc full_regions"; "regions" => full_regions_vec.len());
+                    let regions = full_regions_vec
                         .into_iter()
                         .filter(move |r| find_peer(r, store_id).is_some())
                         .peekable();
                     let keys = keys.into_iter().peekable();
-                    return Ok(Box::new(KeysInRegions { keys, regions }));
+                    return Ok(Box::new(KeysInRegions {
+                        keys,
+                        regions,
+                        has_logged: false,
+                    }));
                 }
             }
             Ok(Box::new(keys.into_iter()))
@@ -343,6 +362,9 @@ where
         let mut reader = MvccReader::new(snapshot, None /*scan_mode*/, false);
         let mut gc_info = GcInfo::default();
         let mut next_gc_key = keys.next();
+        if let Some(ref key) = next_gc_key {
+            info!("First next_gc_key"; "key" => %key);
+        }
         while let Some(ref key) = next_gc_key {
             if let Err(e) = self.gc_key(safe_point, &key, &mut gc_info, &mut txn, &mut reader) {
                 error!(?e; "GC meets failure"; "key" => %key,);
@@ -374,6 +396,7 @@ where
                 reader = MvccReader::new(snapshot, Some(ScanMode::Forward), false);
             }
         }
+        info!("last gc info"; "gc_info" => ?gc_info);
         Self::flush_txn(txn, &self.limiter, &self.engine)?;
         Ok(())
     }
@@ -561,6 +584,7 @@ where
                 store_id,
                 region_info_provider,
             } => {
+                info!("GcKeys running"; "gcKeysStart" => %(keys.first().unwrap()), "gcKeysEnd" => %(keys.last().unwrap()));
                 let old_seek_tombstone = self.stats.write.seek_tombstone;
                 let res = self.gc_keys(keys, safe_point, Some((store_id, region_info_provider)));
                 let new_seek_tombstone = self.stats.write.seek_tombstone;

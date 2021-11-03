@@ -208,7 +208,7 @@ impl CompactionFilterFactory for WriteCompactionFilterFactory {
             return std::ptr::null_mut();
         }
 
-        debug!(
+        info!(
             "gc in compaction filter"; "safe_point" => safe_point,
             "files" => ?context.file_numbers(),
             "bottommost" => context.is_bottommost_level(),
