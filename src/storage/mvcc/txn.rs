@@ -8,7 +8,7 @@ use txn_types::{Key, Lock, TimeStamp, Value};
 
 pub const MAX_TXN_WRITE_SIZE: usize = 32 * 1024;
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct GcInfo {
     pub found_versions: usize,
     pub deleted_versions: usize,
