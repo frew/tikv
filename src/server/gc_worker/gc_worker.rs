@@ -312,7 +312,7 @@ where
                         info!("gc Doing key check");
                     }
                     let key = self.keys.peek()?;
-                    let data_key = keys::data_key(key.as_encoded());
+                    let data_key = key.as_encoded();
                     if !self.has_logged {
                         info!("gc First keys"; "data_key" => ?data_key, "region_key" => ?(region.get_start_key()));
                         self.has_logged = true
