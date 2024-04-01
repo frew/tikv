@@ -101,7 +101,7 @@ impl RocksSnapshotQueueManager {
             let mut queue_state = self.queue_state.lock().unwrap();
             // Wake up next leader if exists
             if queue_state.queued_leader.is_some() {
-                queue_state.queued_leader.take().unwrap().send(());
+                queue_state.queued_leader.take().unwrap().send(()).unwrap();
             } else {
                 queue_state.is_running = false;
             }
@@ -109,7 +109,7 @@ impl RocksSnapshotQueueManager {
 
         // Send snapshot to followers
         for follower in followers {
-            follower.send(snapshot.clone());
+            follower.send(snapshot.clone()).unwrap();
         }
 
         return snapshot;
