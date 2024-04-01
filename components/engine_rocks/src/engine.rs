@@ -7,7 +7,7 @@ use rocksdb::{DBIterator, Writable, DB};
 
 use crate::{
     db_vector::RocksDbVector, options::RocksReadOptions, r2e, util::get_cf_handle,
-    RocksEngineIterator, RocksSnapshot,
+    RocksEngineIterator, RocksSnapshot, RocksSnapshotQueueManager,
 };
 
 #[cfg(feature = "trace-lifetime")]
@@ -148,16 +148,19 @@ pub struct RocksEngine {
     support_multi_batch_write: bool,
     #[cfg(feature = "trace-lifetime")]
     _id: trace::TabletTraceId,
+    snapshot_queue_manager: Arc<RocksSnapshotQueueManager>,
 }
 
 impl RocksEngine {
     pub fn new(db: DB) -> RocksEngine {
         let db = Arc::new(db);
+        let snapshot_queue_manager = Arc::new(RocksSnapshotQueueManager::new(db.clone()));
         RocksEngine {
             support_multi_batch_write: db.get_db_options().is_enable_multi_batch_write(),
             #[cfg(feature = "trace-lifetime")]
             _id: trace::TabletTraceId::new(db.path(), &db),
             db,
+            snapshot_queue_manager,
         }
     }
 
@@ -183,7 +186,7 @@ impl KvEngine for RocksEngine {
     type Snapshot = RocksSnapshot;
 
     fn snapshot(&self) -> RocksSnapshot {
-        RocksSnapshot::new(self.db.clone())
+        self.snapshot_queue_manager.get()
     }
 
     fn sync(&self) -> Result<()> {

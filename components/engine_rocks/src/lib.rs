@@ -49,6 +49,8 @@ pub use crate::misc::*;
 pub mod range_properties;
 mod snapshot;
 pub use crate::{range_properties::*, snapshot::*};
+mod queue_manager;
+pub use crate::queue_manager::*;
 mod sst;
 pub use crate::sst::*;
 mod sst_partitioner;
